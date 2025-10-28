@@ -992,27 +992,92 @@ def main():
 
 
     # --- 5. Forecasting Tab ---
-    # --- 5. Forecasting Tab ---
-    with tab_forecast:
-        st.subheader(t('forecasting'))
-        
-        # Display current date column selection
-        current_date_col = st.session_state.get('selected_date_col', '')
-        if current_date_col:
-            st.info(f"Using date column: {current_date_col}")
-        else:
-            st.warning(t('forecast_no_date'))
-        
-        fc1, fc2 = st.columns(2)
-        with fc1:
-            fc_col = st.selectbox(t('forecast_column'), options=[''] + default_numeric, index=0, key='fc_col')
-        with fc2:
-            fc_periods = st.number_input(t('forecast_periods'), min_value=1, max_value=365, value=12, key='fc_periods')
-        
-        if st.button(t('run_forecast')):
-            with st.spinner('Running forecast...'):
-                # Use the date column from session state
-                run_forecast(df, st.session_state.get('selected_date_col'), fc_col, fc_periods)
+    import pandas as pd, numpy as np, plotly.graph_objects as go, streamlit as st
+    from typing import Optional
+    
+    def run_forecast(df: pd.DataFrame, date_col: Optional[str], fc_col: str, fc_periods: int):
+        """Simple polynomial forecast (degree 1–2) with optional date column."""
+        if not fc_col:
+            st.warning(t('forecast_warn'))
+            return
+    
+        try:
+            # ================= WITH DATE COLUMN =================
+            if date_col:
+                tmp = df[[date_col, fc_col]].copy()
+                tmp[date_col] = pd.to_datetime(tmp[date_col], errors='coerce')
+                tmp = tmp.dropna(subset=[date_col, fc_col])
+                tmp = tmp.groupby(date_col, as_index=False)[fc_col].mean().sort_values(date_col)
+                y = tmp.set_index(date_col)[fc_col]
+                if y.shape[0] < 2:
+                    st.warning(t('forecast_no_data')); return
+    
+                deg = 2 if len(y) >= 6 else 1
+                x = np.arange(len(y))
+                model = np.poly1d(np.polyfit(x, y.values, deg))
+                resid_std = np.nanstd(y.values - model(x))
+                ci = 1.96 * resid_std
+    
+                # --- Generate forecast dates from TODAY ---
+                future_dates = pd.date_range(start=pd.Timestamp.today().normalize(), periods=fc_periods, freq='M')
+                preds = model(np.arange(len(y), len(y) + fc_periods))
+    
+                forecast_df = pd.DataFrame({
+                    date_col: future_dates,
+                    'forecast': preds,
+                    'lower_band': preds - ci,
+                    'upper_band': preds + ci
+                })
+    
+                fig = go.Figure([
+                    go.Scatter(x=y.index, y=y, mode='lines', name=t('actual'), line=dict(color='blue')),
+                    go.Scatter(x=future_dates, y=preds, mode='lines', name=t('forecast'),
+                               line=dict(dash='dash', color='red', width=3)),
+                    go.Scatter(x=list(future_dates) + list(future_dates[::-1]),
+                               y=list(preds + ci) + list(preds - ci)[::-1],
+                               fill='toself', fillcolor='rgba(255,0,0,0.15)', line=dict(color='rgba(0,0,0,0)'),
+                               hoverinfo='skip', name=t('confidence'))
+                ])
+                fig.update_layout(title=f"{fc_col} - {t('forecast')}", xaxis_title=date_col, yaxis_title=fc_col)
+                st.plotly_chart(fig, use_container_width=True)
+                st.dataframe(forecast_df)
+    
+            # ================= NO DATE COLUMN =================
+            else:
+                st.info(t('forecast_no_date'))
+                series = df[fc_col].dropna().astype(float)
+                if len(series) < 2:
+                    st.warning(t('forecast_no_data')); return
+    
+                deg = 2 if len(series) >= 6 else 1
+                x = np.arange(len(series))
+                model = np.poly1d(np.polyfit(x, series.values, deg))
+                resid_std = np.nanstd(series.values - model(x))
+                ci = 1.96 * resid_std
+    
+                # --- Forecast starting from TODAY ---
+                future_dates = pd.date_range(start=pd.Timestamp.today().normalize(), periods=fc_periods, freq='D')
+                preds = model(np.arange(len(series), len(series) + fc_periods))
+    
+                forecast_df = pd.DataFrame({
+                    'Date': future_dates,
+                    'forecast': preds,
+                    'lower_band': preds - ci,
+                    'upper_band': preds + ci
+                })
+    
+                fig = go.Figure([
+                    go.Scatter(x=x, y=series, mode='lines', name=t('actual')),
+                    go.Scatter(x=np.arange(len(series), len(series) + fc_periods),
+                               y=preds, mode='lines', name=t('forecast'),
+                               line=dict(dash='dash', color='red', width=3))
+                ])
+                st.plotly_chart(fig, use_container_width=True)
+                st.dataframe(forecast_df)
+    
+        except Exception as e:
+            st.error(f"{t('forecast_fail')}: {e}")
+
 
     # --- 6. Data Insights Tab ---
     with tab_insights:
