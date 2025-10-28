@@ -992,8 +992,8 @@ def main():
 
 
     # --- 5. Forecasting Tab ---
-    import pandas as pd, numpy as np, plotly.graph_objects as go, streamlit as st
-    from typing import Optional
+    
+    
     
     def run_forecast(df: pd.DataFrame, date_col: Optional[str], fc_col: str, fc_periods: int):
         """Simple polynomial forecast (degree 1–2) with optional date column."""
