@@ -1,6 +1,7 @@
-
+# Sales_Insights_Pro.py
+#
 # A professional, multi-lingual, multi-file-type Sales Dashboard and Forecasting tool.
-# Version 3.2: Added dedicated date column selector to forecasting tab
+# Version 3.1: Relaxed forecast requirement, added 'Average' to stats, and improved insight detection.
 #
 # Author: Sameh Sobhy Attia (Original)
 # Refactored by: Gemini (Professional Upgrade)
@@ -708,4 +709,430 @@ def get_automated_insights(df: pd.DataFrame) -> Tuple[List[Tuple[str, str, str]]
         insights_dict['insight_total_qty'] = f"{total_qty:,.2f}"
         insights.append(('📦', 'insight_total_qty', f"{total_qty:,.2f}"))
 
-    # Find
+    # Find top categories
+    if branch_col and revenue_col and pd.api.types.is_numeric_dtype(df[revenue_col]):
+        top_branch = df.groupby(branch_col)[revenue_col].sum().idxmax()
+        insights_dict['insight_top_branch'] = str(top_branch)
+        insights.append(('🏢', 'insight_top_branch', str(top_branch)))
+    if salesman_col and revenue_col and pd.api.types.is_numeric_dtype(df[revenue_col]):
+        top_salesman = df.groupby(salesman_col)[revenue_col].sum().idxmax()
+        insights_dict['insight_top_salesman'] = str(top_salesman)
+        insights.append(('🧍‍♂️', 'insight_top_salesman', str(top_salesman)))
+    if product_col and revenue_col and pd.api.types.is_numeric_dtype(df[revenue_col]):
+        top_product = df.groupby(product_col)[revenue_col].sum().idxmax()
+        insights_dict['insight_top_product'] = str(top_product)
+        insights.append(('🛒', 'insight_top_product', str(top_product)))
+
+    return insights, insights_dict, revenue_col, branch_col
+
+# ================================================
+# 7. DYNAMIC PLOTTING FUNCTION (FOR DASHBOARD)
+# ================================================
+
+def plot_dynamic_chart(data: pd.DataFrame, chart_type: str, x_axis: Optional[str], y_axes: List[str]):
+    """Helper function to generate plots for the interactive dashboard."""
+    if not y_axes and chart_type not in ['Heatmap']:
+        st.warning(t('plot_warn'))
+        return
+    
+    try:
+        if chart_type in ['Line', 'Bar', 'Area', 'Scatter']:
+            x_arg = x_axis if x_axis else None
+            if x_arg:
+                df_melted = data.melt(id_vars=[x_arg], value_vars=y_axes, var_name='Metric', value_name='Value')
+            else:
+                df_melted = data[y_axes].melt(var_name='Metric', value_name='Value')
+                
+            if chart_type == 'Line':
+                fig = px.line(df_melted, x=x_arg, y='Value', color='Metric', title=f"{chart_type} Chart")
+            elif chart_type == 'Bar':
+                fig = px.bar(df_melted, x=x_arg, y='Value', color='Metric', title=f"{chart_type} Chart", barmode='group')
+            elif chart_type == 'Area':
+                fig = px.area(df_melted, x=x_arg, y='Value', color='Metric', title=f"{chart_type} Chart")
+            elif chart_type == 'Scatter':
+                fig = px.scatter(df_melted, x=x_arg, y='Value', color='Metric', title=f"{chart_type} Chart")
+            st.plotly_chart(fig, use_container_width=True)
+        
+        elif chart_type == 'Box':
+            fig = px.box(data[y_axes], y=y_axes)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        elif chart_type == 'Pie':
+            names_col = x_axis if x_axis else (data.columns[0] if not data.empty else None)
+            if names_col and y_axes:
+                fig = px.pie(data, names=names_col, values=y_axes[0], title=f"Pie Chart: {y_axes[0]}")
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("Please select an X-Axis (for labels) and at least one Y-Axis (for values).")
+        
+        elif chart_type == 'Heatmap':
+            num_df = data.select_dtypes(include=[np.number])
+            if num_df.shape[1] < 2:
+                st.warning(t('no_corr'))
+            else:
+                corr = num_df.corr()
+                fig = px.imshow(corr, text_auto=True, aspect="auto", title="Correlation Heatmap")
+                st.plotly_chart(fig, use_container_width=True)
+
+    except Exception as e:
+        st.error(f"Could not plot: {e}")
+
+# ================================================
+# 8. MAIN STREAMLIT APP LAYOUT
+# ================================================
+
+def main():
+    
+    # --- Sidebar ---
+    with st.sidebar:
+        st.header(t('title'))
+        lang_options = ['English', 'Arabic']
+        lang_index = 1 if st.session_state.get('lang', 'en') == 'ar' else 0
+        lang = st.selectbox(t('language'), options=lang_options, index=lang_index)
+        st.session_state['lang'] = 'ar' if lang == 'Arabic' else 'en'
+        
+        dark = st.checkbox(t('theme'))
+        if dark:
+            st.markdown("""
+            <style>
+            .stApp { background-color: #0f1724; color: #e6edf3; }
+            </style>
+            """, unsafe_allow_html=True)
+        
+        st.markdown("---")
+        
+        uploaded_file = st.file_uploader(t('upload'), type=['xlsx', 'xls', 'csv', 'pdf', 'html', 'htm'])
+        if uploaded_file:
+            # Check if it's a new file before reloading
+            if uploaded_file.name != st.session_state.get('file_name'):
+                with st.spinner('Loading data...'):
+                    load_data(uploaded_file)
+        
+        if st.button(t('load_sample')):
+            with st.spinner('Loading sample data...'):
+                load_sample_data()
+
+    # --- Main Page ---
+    st.title(t('title'))
+
+    df = st.session_state.get('df')
+
+    if df is None:
+        st.info(f"ℹ️ {t('upload_prompt')}")
+        
+        # Footer
+        st.markdown(
+            """
+            <hr style="margin-top:50px; margin-bottom:10px; border:1px solid #444;">
+            <div style='text-align: center; color: #aaa; font-size: 14px;'>
+                {t('footer_credit')} <b style='color:#00BFFF;'>Sameh Sobhy Attia</b>
+            </div>
+            """.replace('{t(\'footer_credit\')}', t('footer_credit')),
+            unsafe_allow_html=True
+        )
+        return
+
+    # --- Data Loaded - Show Tabs ---
+    
+    if st.checkbox(t('show_data')):
+        # Calculate height: (rows + 1 header) * 35px/row + 3px extra
+        table_height = (len(df) + 1) * 35 + 3
+        # Set a max height to avoid crashing the browser on huge datasets
+        if table_height > 1000:
+            table_height = 1000
+        st.dataframe(df, use_container_width=True, height=table_height)
+
+    all_cols = df.columns.tolist()
+    default_numeric = [c for c in all_cols if pd.api.types.is_numeric_dtype(df[c])]
+    default_date = next((c for c in all_cols if 'date' in str(c).lower() or 'مبيعات' in str(c).lower()), None)
+    date_col_index = all_cols.index(default_date) + 1 if default_date else 0
+    
+    # --- Tabbed Interface ---
+    tab_kpi, tab_dashboard, tab_pivot, tab_charts, tab_forecast, tab_insights, tab_export = st.tabs([
+        f"📊 {t('kpi_tab')}",
+        f"✨ {t('dashboard_tab')}",
+        f"📋 {t('pivot_tab')}",
+        f"📈 {t('charts_tab')}",
+        f"🔮 {t('forecast_tab')}",
+        f"💡 {t('insights_tab')}",
+        f"📄 {t('export_tab')}"
+    ])
+
+    # --- 1. KPI & Stats Tab ---
+    with tab_kpi:
+        st.subheader(t('config'))
+        c1, c2 = st.columns(2)
+        with c1:
+            # This selection is used by other tabs (Forecast)
+            date_col = st.selectbox(t('date_column'), options=[''] + all_cols, index=date_col_index, key='date_col_selector')
+            date_col = date_col if date_col else None
+        with c2:
+            numeric_cols = st.multiselect(t('kpi_selection'), options=all_cols, default=default_numeric[:3])
+        
+        st.markdown("---")
+        
+        st.subheader(f"🔹 {t('total_everything')}")
+        # Use cached function
+        totals_dict_all, grand_all = grand_totals(df)
+        kpi_cols_display = list(totals_dict_all.keys())[:5] # Show up to 5
+        kpi_cols = st.columns(len(kpi_cols_display) if kpi_cols_display else 1)
+        for i, k in enumerate(kpi_cols_display):
+            kpi_cols[i].metric(k, f"{totals_dict_all[k]:,.2f}")
+        st.metric(t('grand_total'), f"{grand_all:,.2f}")
+        
+        st.markdown("---")
+        
+        st.subheader(f"🔸 {t('selected_kpis')}")
+        if numeric_cols:
+            selected_df = df[numeric_cols].select_dtypes(include=[np.number])
+            if not selected_df.empty:
+                # This is a fast operation, no need to cache
+                totals_dict = selected_df.sum(numeric_only=True).to_dict()
+                grand_selected = selected_df.sum(numeric_only=True).sum()
+                
+                kpi_cols_sel = st.columns(len(totals_dict) if totals_dict else 1)
+                for i, (col, val) in enumerate(totals_dict.items()):
+                    kpi_cols_sel[i].metric(col, f"{val:,.2f}")
+                st.metric(t('grand_total'), f"{grand_selected:,.2f}")
+            else:
+                st.info(t('no_kpis_selected'))
+        else:
+            st.info(t('no_kpis_selected'))
+
+        st.markdown("---")
+        st.subheader(t('stats_summary'))
+        # Use cached function
+        stat_df = stats_summary(df)
+        if not stat_df.empty:
+            # UPDATED: Rename columns using translations
+            stat_df = stat_df.rename(columns={
+                'count': t('stat_count'),
+                'mean': t('stat_mean'), # This becomes 'Average'
+                'median': t('stat_median'),
+                'max': t('stat_max'),
+                'min': t('stat_min'),
+                'std': t('stat_std')
+            })
+            st.dataframe(stat_df.style.format("{:,.2f}"))
+        else:
+            st.info(t('no_numeric_stats'))
+
+    # --- 2. Interactive Dashboard Tab ---
+    with tab_dashboard:
+        st.subheader(t('dashboard_tab'))
+        st.info(t('dashboard_info'))
+
+        # --- Dashboard Controls ---
+        ch1, ch2, ch3 = st.columns(3)
+        with ch1:
+            dash_chart_type = st.selectbox(t('chart_type'), options=['Line', 'Bar', 'Area', 'Scatter', 'Box', 'Pie'], key='dash_chart_type')
+        with ch2:
+            dash_x_axis = st.selectbox(t('x_axis'), options=[''] + all_cols, index=date_col_index, key='dash_x')
+        with ch3:
+            dash_y_axes = st.multiselect(t('y_axis'), options=all_cols, default=default_numeric[:1], key='dash_y')
+
+        # --- Interactive Dataframe ---
+        st.dataframe(df, on_select="rerun", selection_mode="multi-row", key="dashboard_selector", use_container_width=True, height=300)
+
+        # --- Check selection and plot ---
+        selection_state = st.session_state.get("dashboard_selector", {})
+        selected_rows_indices = selection_state.get("selection", {}).get("rows", [])
+
+        if selected_rows_indices:
+            selected_df = df.iloc[selected_rows_indices]
+            st.subheader(f"{t('plot_selection_title')} ({len(selected_rows_indices)} {t('rows')})")
+            plot_dynamic_chart(selected_df, dash_chart_type, dash_x_axis, dash_y_axes)
+        else:
+            st.subheader(t('plot_all_title'))
+            plot_dynamic_chart(df, dash_chart_type, dash_x_axis, dash_y_axes)
+
+
+    # --- 3. Pivot Table Tab ---
+    with tab_pivot:
+        st.subheader(t('pivot_config'))
+        p1, p2 = st.columns(2)
+        with p1:
+            pivot_rows = st.multiselect(t('row_field'), options=all_cols, default=all_cols[0] if all_cols else [], key='pivot_rows')
+            pivot_cols = st.multiselect(t('col_field'), options=all_cols, key='pivot_cols')
+        with p2:
+            pivot_value = st.selectbox(t('value_col'), options=[''] + all_cols, index=0, key='pivot_val')
+            pivot_agg = st.selectbox(t('agg_type'), options=['sum', 'mean', 'median', 'count', 'min', 'max', 'std'], index=0, key='pivot_agg')
+        
+        if st.button(t('generate_pivot')):
+            with st.spinner('Generating pivot table...'):
+                pivot_value_arg = pivot_value if pivot_value else None
+                if not pivot_value_arg:
+                    pivot_agg = 'count'
+                
+                # Use cached function
+                pvt = generate_pivot(df, rows=pivot_rows, cols=pivot_cols, values=pivot_value_arg, aggfunc=pivot_agg)
+                
+                if pvt is not None:
+                    st.dataframe(pvt.style.format("{:,.2f}").background_gradient(cmap='viridis', axis=1))
+                    
+                    excel_bytes = df_to_excel_bytes({'pivot': pvt})
+                    st.download_button(t('download_pivot'), data=excel_bytes, file_name='pivot_table.xlsx')
+                else:
+                    st.error("Could not generate pivot table. Check selections.")
+
+    # --- 4. Manual Charts Tab ---
+    with tab_charts:
+        st.subheader(t('charts'))
+        ch1, ch2, ch3 = st.columns(3)
+        with ch1:
+            chart_type = st.selectbox(t('chart_type'), options=['Line', 'Bar', 'Area', 'Scatter', 'Box', 'Pie', 'Heatmap'], key='chart_type')
+        with ch2:
+            x_axis = st.selectbox(t('x_axis'), options=[''] + all_cols, index=date_col_index, key='chart_x')
+        with ch3:
+            y_axes = st.multiselect(t('y_axis'), options=all_cols, default=default_numeric[:1], key='chart_y')
+
+        if st.button(t('plot')):
+            with st.spinner('Plotting...'):
+                plot_dynamic_chart(df, chart_type, x_axis, y_axes)
+
+
+    # --- 5. Forecasting Tab ---
+    # --- 5. Forecasting Tab ---
+    with tab_forecast:
+        st.subheader(t('forecasting'))
+        
+        # Display current date column selection
+        current_date_col = st.session_state.get('selected_date_col', '')
+        if current_date_col:
+            st.info(f"Using date column: {current_date_col}")
+        else:
+            st.warning(t('forecast_no_date'))
+        
+        fc1, fc2 = st.columns(2)
+        with fc1:
+            fc_col = st.selectbox(t('forecast_column'), options=[''] + default_numeric, index=0, key='fc_col')
+        with fc2:
+            fc_periods = st.number_input(t('forecast_periods'), min_value=1, max_value=365, value=12, key='fc_periods')
+        
+        if st.button(t('run_forecast')):
+            with st.spinner('Running forecast...'):
+                # Use the date column from session state
+                run_forecast(df, st.session_state.get('selected_date_col'), fc_col, fc_periods)
+
+    # --- 6. Data Insights Tab ---
+    with tab_insights:
+        st.subheader(t('insights'))
+        with st.spinner('Generating insights...'):
+            # Use cached function
+            # UPDATED: Get raw keys from function
+            raw_insights, raw_insights_dict, rev_col, br_col = get_automated_insights(df)
+            
+            # NEW: Translate the results here
+            translated_insights_dict = {t(key): value for key, value in raw_insights_dict.items()}
+            translated_insights_list = [(emoji, t(key), value) for emoji, key, value in raw_insights]
+
+            if translated_insights_dict:
+                c1, c2 = st.columns(2)
+                with c1:
+                    # UPDATED: Use translated dict and translated column names
+                    st.dataframe(pd.DataFrame(list(translated_insights_dict.items()), columns=[t('stat_metric'), t('stat_value')]))
+                with c2:
+                    # UPDATED: Use translated list
+                    for emoji, key, value in translated_insights_list:
+                        st.markdown(f"- {emoji} {key}: {value}")
+                
+                if rev_col and br_col and pd.api.types.is_numeric_dtype(df[rev_col]):
+                    try:
+                        st.markdown("---")
+                        st.subheader(f"Revenue by {br_col}")
+                        df_grouped = df.groupby(br_col, as_index=False)[rev_col].sum()
+                        fig = px.bar(df_grouped, x=br_col, y=rev_col,
+                                     title=f"Branch Performance", color=br_col, text_auto=".2s")
+                        fig.update_layout(showlegend=False)
+                        st.plotly_chart(fig, use_container_width=True)
+                    except Exception as e:
+                        st.warning(f"Could not plot branch insights: {e}")
+            else:
+                st.info("No specific insights found for columns like 'Revenue', 'Branch', etc.")
+
+        st.markdown("---")
+        st.subheader(t('missing_values'))
+        miss = df.isna().sum()
+        miss = miss[miss > 0]
+        if miss.empty:
+            st.success("No missing values found.")
+        else:
+            st.dataframe(miss)
+
+        st.markdown("---")
+        st.subheader(t('correlations'))
+        num_df = df.select_dtypes(include=[np.number])
+        if num_df.shape[1] >= 2:
+            # FIX: Changed cmap='vlag' to 'coolwarm' to resolve ValueError
+            st.dataframe(num_df.corr().style.background_gradient(cmap='coolwarm', vmin=-1, vmax=1).format("{:,.2f}"))
+        else:
+            st.info(t('no_corr'))
+
+    # --- 7. Export Tab ---
+    with tab_export:
+        st.subheader(t('export_tab'))
+        # Get cached insights and stats
+        # UPDATED: Get raw insights and translate them for the report
+        raw_insights, _, _, _ = get_automated_insights(df)
+        insights = [f"{emoji} {t(key)}: {value}" for emoji, key, value in raw_insights]
+        stat_df = stats_summary(df)
+        # UPDATED: Translate stats df for the report as well
+        stat_df_translated = stat_df.rename(columns={
+            'count': t('stat_count'),
+            'mean': t('stat_mean'),
+            'median': t('stat_median'),
+            'max': t('stat_max'),
+            'min': t('stat_min'),
+            'std': t('stat_std')
+        })
+
+        # Excel Download
+        excel_data = df_to_excel_bytes({
+            'Raw_Data': df,
+            'Statistics': stat_df_translated.reset_index() # Use translated
+        })
+        st.download_button(
+            label=f"📥 {t('download_excel')}",
+            data=excel_data,
+            file_name=f"Sales_Summary_{st.session_state.get('file_name', 'report')}.xlsx",
+            mime="application/vnd.ms-excel"
+        )
+        
+        # HTML Download
+        html_data = create_html_report(df, insights)
+        st.download_button(
+            label=f"📥 {t('download_html')}",
+            data=html_data,
+            file_name=f"Sales_Report_{st.session_state.get('file_name', 'report')}.html",
+            mime="text/html"
+        )
+        
+        # PDF Download
+        try:
+            with st.spinner('Generating PDF Report...'):
+                pdf_data = generate_pdf_report(df, stat_df_translated, insights) # Use translated
+            st.download_button(
+                label=f"📥 {t('download_pdf')}",
+                data=pdf_data,
+                file_name=f"Sales_Report_{st.session_state.get('file_name', 'report')}.pdf",
+                mime="application/pdf"
+            )
+        except Exception as e:
+            st.error(f"Could not generate PDF. Error: {e}")
+
+    # --- Footer ---
+    st.markdown(
+        """
+        <hr style="margin-top:50px; margin-bottom:10px; border:1px solid #444;">
+        <div style='text-align: center; color: #aaa; font-size: 16px;'>
+            {t('footer_credit')} <b style='color:#00BFFF;'>Sameh Sobhy Attia</b> (Pro Version by TIBA for Sales)
+        </div>
+        """.replace('{t(\'footer_credit\')}', t('footer_credit')),
+        unsafe_allow_html=True
+    )
+
+# ================================================
+# RUN THE APP
+# ================================================
+if __name__ == "__main__":
+    main()
