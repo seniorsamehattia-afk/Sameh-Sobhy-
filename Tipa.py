@@ -1,6 +1,4 @@
-[file name]: Sales_Insights_Pro.py
-[file content begin]
-#
+
 # A professional, multi-lingual, multi-file-type Sales Dashboard and Forecasting tool.
 # Version 3.2: Added dedicated date column selector to forecasting tab
 #
