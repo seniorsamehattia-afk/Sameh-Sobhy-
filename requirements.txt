@@ -12,3 +12,4 @@ pdfplumber
 lxml
 beautifulsoup4
 requests
+st-aggrid
